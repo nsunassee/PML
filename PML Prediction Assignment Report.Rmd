@@ -1,0 +1,128 @@
+---
+title: "Practical Machine Learning Prediction Assignment"
+author: "Nakkiran Sunassee"
+date: "06 December 2018"
+output: html_document
+---
+
+## Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+In this report, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways, and predict the manner in which they did the exercise.
+
+## Data
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har
+
+
+## Environment Setup
+The setup for this report consists of loading the required libraries and setting the seed for reproducibility, and then downloading and reading in the data:
+
+#### Loading Required Libraries & Setting the seed
+```{r warning=FALSE, error=FALSE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+set.seed(2941)
+```
+
+#### Downloading & Reading in data
+```{r}
+# download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "pml-training.csv", method = "auto")
+# download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "pml-testing.csv", method = "auto")
+trainDataRaw <- read.csv("pml-training.csv")
+testDataRaw <- read.csv("pml-testing.csv")
+dim(trainDataRaw)
+dim(testDataRaw)
+```
+
+## Cleaning Data
+Now that the data has been read in, it must be cleaned by removing near-zero variables, observations with missing values, and unrequired variables:
+
+#### Removing the near-zero Variables
+```{r}
+trainDataTemp <- nearZeroVar(trainDataRaw, saveMetrics = TRUE)
+testDataTemp <- nearZeroVar(testDataRaw, saveMetrics = TRUE)
+trainingDatanzv <- trainDataRaw[, !trainDataTemp$nzv]
+testingDatanzv <- testDataRaw[, !testDataTemp$nzv]
+dim(trainingDatanzv)
+dim(testingDatanzv)
+```
+#### Removing columns containing observations with missing values  
+```{r}
+trainDataTemp <- (colSums(is.na(trainingDatanzv)) == 0)
+testingDataTemp <- (colSums(is.na(testingDatanzv)) == 0)
+trainingDataNA <- trainingDatanzv[, trainDataTemp]
+testingDataNA <- testingDatanzv[, testingDataTemp]
+dim(trainingDataNA)
+dim(testingDataNA)
+```
+#### Removing unrequired variables  
+```{r}
+x <- grepl("X|timestamp|user_name|window", colnames(trainingDataNA))
+trainingDataFinal <- trainingDataNA[,-x]
+testingDataFinal <- testingDataNA[,-x]
+dim(trainingDataFinal)
+dim(testingDataFinal)
+```
+
+## Data Analysis
+Firstly, the data must be partitioned to create a validation data set. The analysis consists of a Decision Tree and a Random Forest, and finally a prediction on the test dataset based on which model is more accurate.
+
+### Partitioning the data
+The data is now split into a 70% pure training data set and a 30% validation data set. The validation data will be used for cross-validation purposes.  
+```{r}
+trainingData <- createDataPartition(trainingDataFinal$classe, p=0.70, list=FALSE)
+training <- trainingDataFinal[trainingData, ]
+validation <- trainingDataFinal[-trainingData, ]
+```
+
+### Decision Tree  
+A decision tree is used to fit a predictive model for activity recognition:  
+```{r}
+trainTree <- rpart(classe ~ ., data=training, method="class")
+prp(trainTree)
+```
+
+Now, the predictive model is applied to the validation data:  
+```{r}
+validTree <- predict(trainTree, validation, type="class")
+confusionMatrix(validation$classe, validTree)
+acc <- postResample(validTree, validation$classe)
+err <- 1 - as.numeric(confusionMatrix(validation$classe, validTree)$overall[1])
+```
+The Estimated Accuracy of the Decision Tree Model is 86.22% and the Estimated Out-of-Sample Error is 13.78%.
+
+### Random Forest
+A random forest is used to fit a predictive model for activity recognition:
+```{r}
+randomF <- train(classe ~ ., data=training, method="rf", trControl=trainControl(method="cv",5), ntree=250)
+randomF
+```
+Now, the predictive model is applied to the validation data:  
+```{r}
+validRF <- predict(randomF, validation)
+confusionMatrix(validation$classe, validRF)
+acc <- postResample(validRF, validation$classe)
+err <- 1 - as.numeric(confusionMatrix(validation$classe, validRF)$overall[1])
+```
+The Estimated Accuracy of the Random Forest Model is 99.93% and the Estimated Out-of-Sample Error is 0.067%.
+
+### Applying the predictive model to the Test Data
+Since the Random Forest Model is more accurate than the Decision Tree model, the former will be applied to the original testing data:  
+```{r}
+predict(randomF, testingDataFinal[, -length(names(testingDataFinal))])
+```
+
+## Generating assignment files
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("solutions/problem_id_",i,".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+pml_write_files(predict(randomF, testingDataFinal[, -length(names(testingDataFinal))]))
+```
